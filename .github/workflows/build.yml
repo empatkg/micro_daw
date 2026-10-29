@@ -29,8 +29,10 @@ jobs:
           cmake -B native/build -S native -DCMAKE_BUILD_TYPE=Release
           cmake --build native/build --config Release --parallel
 
-      - name: Enable Windows Desktop
-        run: flutter config --enable-windows-desktop
+      - name: Enable & Create Windows Desktop Support
+        run: |
+          flutter config --enable-windows-desktop
+          flutter create --platforms=windows .
 
       - name: Build Flutter Windows Release
         run: flutter build windows --release
