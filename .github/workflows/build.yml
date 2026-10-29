@@ -1,4 +1,4 @@
-name: Build Native Engine & Flutter DAW
+name: Build Micro DAW (Windows & Android)
 
 on:
   push:
@@ -7,36 +7,46 @@ on:
     branches: [ main ]
 
 jobs:
-  build-linux-native:
-    name: Build C++ Shared Library (Linux)
-    runs-on: ubuntu-22.04
+  build-windows:
+    name: Build Windows (.dll & Executable)
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Linux Audio & C++ Dependencies
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Configure & Build C++ Shared Library (MSVC)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential libasound2-dev libjack-jackd2-dev \
-            ladspa-sdk libcurl4-openssl-dev libfreetype6-dev libx11-dev libxcomposite-dev \
-            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
-            libsysfs-dev freeglut3-dev libgtk-3-dev
+          cmake -B native/build -S native -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --config Release --parallel
 
-      - name: Configure CMake
-        run: cmake -B native/build -S native -DCMAKE_BUILD_TYPE=Release
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
 
-      - name: Build Tracktion Bridge Shared Library
-        run: cmake --build native/build --config Release -j$(nproc)
+      - name: Build Flutter Windows Release
+        run: flutter build windows --release
 
-      - name: Upload Linux Shared Library (.so)
+      - name: Copy DLL to Output Directory
+        run: |
+          copy native\build\Release\tracktion_bridge.dll build\windows\x64\runner\Release\
+
+      - name: Upload Windows App Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libtracktion_bridge_linux
-          path: native/build/libtracktion_bridge.so
+          name: micro_daw_windows_x64
+          path: build/windows/x64/runner/Release/
 
-  build-android-apk:
-    name: Build Android Shared Library & APK
+  build-android:
+    name: Build Android (arm64-v8a & APK)
     runs-on: ubuntu-22.04
 
     steps:
@@ -55,6 +65,10 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Install Stable Android NDK (r26b)
+        run: |
+          sudo $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+
       - name: Install Dependencies
         run: flutter pub get
 
@@ -62,7 +76,7 @@ jobs:
         run: |
           mkdir -p native/build_android_arm64
           cmake -B native/build_android_arm64 -S native \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_SDK_ROOT/ndk/26.1.10909125/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release
