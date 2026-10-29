@@ -1,0 +1,13 @@
+.dart_tool/
+.packages
+build/
+*.iml
+.idea/
+.vscode/
+native/build/
+native/JUCE/
+native/tracktion_engine/
+*.so
+*.dylib
+*.dll
+*.o
