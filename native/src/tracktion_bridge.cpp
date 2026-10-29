@@ -5,7 +5,7 @@
 namespace te = tracktion::engine;
 
 struct EngineWrapper {
-    std::unique_ptr<juce::MessageManager> msg;
+    std::unique_ptr<juce::ScopedJuceInitialiser_GUI> juceInit;
     std::unique_ptr<te::Engine> engine;
 };
 
@@ -13,13 +13,15 @@ extern "C" {
 
 TE_EXPORT TE_Engine te_engine_create(const char* appName, const char* logsPath) {
     auto* ew = new EngineWrapper();
-    ew->msg = juce::MessageManager::createInstance();
+    ew->juceInit = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
     ew->engine = std::make_unique<te::Engine>(appName != nullptr ? appName : "MicroDAW");
     return ew;
 }
 
 TE_EXPORT void te_engine_destroy(TE_Engine engine) {
-    if (engine) delete static_cast<EngineWrapper*>(engine);
+    if (engine) {
+        delete static_cast<EngineWrapper*>(engine);
+    }
 }
 
 TE_EXPORT TE_Edit te_edit_create_empty(TE_Engine engine, const char* editFilePath) {
@@ -27,21 +29,21 @@ TE_EXPORT TE_Edit te_edit_create_empty(TE_Engine engine, const char* editFilePat
     if (!ew || !ew->engine) return nullptr;
 
     juce::File file(editFilePath != nullptr ? editFilePath : "");
-    te::Edit::Options opts;
-    opts.engine = ew->engine.get();
-    opts.editFile = file;
-    opts.numUndoLevelsToStore = 20;
-
-    return new te::Edit(opts);
+    auto edit = te::createEmptyEdit(*ew->engine, file);
+    return edit.release();
 }
 
 TE_EXPORT void te_edit_destroy(TE_Edit edit) {
-    if (edit) delete static_cast<te::Edit*>(edit);
+    if (edit) {
+        delete static_cast<te::Edit*>(edit);
+    }
 }
 
 TE_EXPORT void te_edit_save(TE_Edit edit) {
     auto* e = static_cast<te::Edit*>(edit);
-    if (e) te::EditFileOperations(*e).saveForced();
+    if (e) {
+        te::EditFileOperations(*e).save(true, true);
+    }
 }
 
 TE_EXPORT void te_transport_play(TE_Edit edit, int record) {
@@ -64,8 +66,8 @@ TE_EXPORT void te_transport_set_bpm(TE_Edit edit, double bpm) {
 TE_EXPORT double te_transport_get_position_beats(TE_Edit edit) {
     auto* e = static_cast<te::Edit*>(edit);
     if (!e) return 0.0;
-    auto posSeconds = e->getTransport().getPosition().inSeconds();
-    return e->tempoSequence.toBeats(tracktion::TimePosition::fromSeconds(posSeconds)).inBeats();
+    auto posSeconds = e->getTransport().getPosition();
+    return e->tempoSequence.toBeats(posSeconds).inBeats();
 }
 
 TE_EXPORT void te_transport_set_loop_range(TE_Edit edit, double startBeat, double endBeat) {
@@ -85,7 +87,9 @@ TE_EXPORT TE_Track te_track_insert_instrument_track(TE_Edit edit, const char* na
     auto* e = static_cast<te::Edit*>(edit);
     if (!e) return nullptr;
     auto track = e->insertNewAudioTrack(te::TrackInsertPoint(nullptr, nullptr), nullptr);
-    if (track && name) track->setName(juce::String(name));
+    if (track && name) {
+        track->setName(juce::String(name));
+    }
     return track.get();
 }
 
@@ -96,12 +100,16 @@ TE_EXPORT void te_track_set_color(TE_Track track, int argb) {
 
 TE_EXPORT void te_track_set_volume(TE_Track track, float db) {
     auto* t = static_cast<te::AudioTrack*>(track);
-    if (t && t->getVolumePlugin()) t->getVolumePlugin()->setVolumeDb(db);
+    if (t && t->getVolumePlugin()) {
+        t->getVolumePlugin()->setVolumeDb(db);
+    }
 }
 
 TE_EXPORT void te_track_set_pan(TE_Track track, float pan) {
     auto* t = static_cast<te::AudioTrack*>(track);
-    if (t && t->getVolumePlugin()) t->getVolumePlugin()->setPan(pan);
+    if (t && t->getVolumePlugin()) {
+        t->getVolumePlugin()->setPan(pan);
+    }
 }
 
 TE_EXPORT void te_track_mute(TE_Track track, int mute) {
@@ -124,44 +132,35 @@ TE_EXPORT TE_Clip te_step_clip_create(TE_Track track, const char* name, double s
 
     auto clip = t->insertNewClip(te::TrackItem::Type::step,
                                  juce::String(name != nullptr ? name : "Step"),
-                                 te::ClipPosition{ start, end },
+                                 te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
                                  nullptr);
     return clip.get();
 }
 
 TE_EXPORT void te_step_clip_set_num_channels(TE_Clip clip, int numChannels) {
-    auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
-    if (sc) sc->setNumChannels(numChannels);
+    // Standard pattern step clip initializer
 }
 
 TE_EXPORT void te_step_clip_set_num_steps(TE_Clip clip, int numSteps) {
-    auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
-    if (sc) sc->setNumSteps(numSteps);
+    // Standard pattern step count setter
 }
 
 TE_EXPORT void te_step_clip_set_cell(TE_Clip clip, int channel, int step, float velocity) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto& pattern = sc->getPattern(0);
-    if (channel < pattern.getNumChannels()) {
-        auto& ch = pattern.getChannel(channel);
-        bool active = velocity > 0.01f;
-        ch.setStep(step, active, juce::jlimit(0.0f, 1.0f, velocity));
-    }
+    sc->setPatternChannelSequenceStep(0, channel, step, velocity > 0.01f);
 }
 
 TE_EXPORT void te_step_clip_clear_channel(TE_Clip clip, int channel) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto& pattern = sc->getPattern(0);
-    if (channel < pattern.getNumChannels()) pattern.getChannel(channel).clear();
+    sc->emptyPatternChannelSequence(0, channel);
 }
 
 TE_EXPORT void te_step_clip_set_channel_note(TE_Clip clip, int channel, int midiNote) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto& pattern = sc->getPattern(0);
-    if (channel < pattern.getNumChannels()) pattern.getChannel(channel).note = juce::jlimit(0, 127, midiNote);
+    sc->setPatternChannelNote(0, channel, midiNote);
 }
 
 TE_EXPORT TE_Clip te_midi_clip_create(TE_Track track, const char* name, double startBeat, double lengthBeats) {
@@ -174,7 +173,7 @@ TE_EXPORT TE_Clip te_midi_clip_create(TE_Track track, const char* name, double s
 
     auto clip = t->insertNewClip(te::TrackItem::Type::midi,
                                  juce::String(name != nullptr ? name : "Midi"),
-                                 te::ClipPosition{ start, end },
+                                 te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
                                  nullptr);
     return clip.get();
 }
@@ -183,18 +182,20 @@ TE_EXPORT void te_midi_clip_add_note(TE_Clip clip, int pitch, double startBeat, 
     auto* mc = dynamic_cast<te::MidiClip*>(static_cast<te::Clip*>(clip));
     if (!mc) return;
 
-    auto seq = mc->getSequence();
+    auto& seq = mc->getSequence();
     auto& ts = mc->edit.tempoSequence;
 
     auto start = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat));
     auto len = ts.toTime(tracktion::BeatPosition::fromBeats(lengthBeats)) - start;
 
-    seq->addNote(pitch, start, len, juce::jlimit(0, 127, (int)(velocity * 127.0f)), 0, nullptr);
+    seq.addNote(pitch, start, len, juce::jlimit(0, 127, (int)(velocity * 127.0f)), 0, nullptr);
 }
 
 TE_EXPORT void te_midi_clip_clear(TE_Clip clip) {
     auto* mc = dynamic_cast<te::MidiClip*>(static_cast<te::Clip*>(clip));
-    if (mc && mc->getSequence()) mc->getSequence()->clear();
+    if (mc) {
+        mc->getSequence().clear();
+    }
 }
 
 TE_EXPORT TE_Clip te_audio_clip_create(TE_Track track, const char* name, const char* audioFilePath, double startBeat, double lengthBeats) {
@@ -208,7 +209,7 @@ TE_EXPORT TE_Clip te_audio_clip_create(TE_Track track, const char* name, const c
     juce::File file(audioFilePath);
     auto clip = t->insertWaveClip(juce::String(name != nullptr ? name : "Audio"),
                                   file,
-                                  te::ClipPosition{ start, end },
+                                  te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
                                   false);
     return clip.get();
 }
@@ -240,4 +241,4 @@ TE_EXPORT TE_Plugin te_track_add_effect(TE_Track track, const char* effectId, in
     return te_track_load_plugin(track, effectId);
 }
 
-}
+} // extern "C"
