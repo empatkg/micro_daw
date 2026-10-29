@@ -1,23 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../ffi/tracktion_bridge.dart';
 import '../models/channel.dart';
 import '../models/pattern.dart';
-import '../models/note.dart';
 
 class ProjectController extends ChangeNotifier {
   late TracktionEngine _engine;
   late Project _project;
   Transport? _transport;
+  Timer? _playbackTimer;
 
   List<Pattern> patterns = [];
   String activePatternId = '';
   List<Channel> channels = [];
-  
+
   int currentStep = -1;
   int stepCount = 16;
   double bpm = 140;
   bool isPlaying = false;
-  int activeChannelIndex = 0;
 
   Future<void> init() async {
     try {
@@ -28,16 +28,21 @@ class ProjectController extends ChangeNotifier {
 
       addPattern('Pattern 1', Colors.orange);
 
-      final trackNames = ['Kick', 'Clap', 'Hat', 'Snare', 'OpenHat', '808', 'Synth', 'FX'];
+      final trackNames = ['Kick', 'Clap', 'Hat', 'Snare', '808 Synth', 'Lead Synth'];
+      final defaultNotes = [36, 38, 42, 40, 48, 60];
+
       for (int i = 0; i < trackNames.length; i++) {
         final track = _project.addInstrumentTrack(trackNames[i]);
         final clip = track.createStepClip('Steps', 0.0, 4.0);
-        channels.add(Channel(
+        
+        final ch = Channel(
           index: i,
           name: trackNames[i],
           color: Colors.primaries[i % Colors.primaries.length],
           stepClip: clip,
-        ));
+          midiNote: defaultNotes[i % defaultNotes.length],
+        );
+        channels.add(ch);
       }
     } catch (e) {
       debugPrint('Engine Init Warning: $e');
@@ -61,19 +66,6 @@ class ProjectController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void duplicatePattern(String id) {
-    final orig = patterns.firstWhere((p) => p.id == id, orElse: () => patterns.first);
-    addPattern('${orig.name} Copy', orig.color);
-  }
-
-  void deletePattern(String id) {
-    if (patterns.length > 1) {
-      patterns.removeWhere((p) => p.id == id);
-      activePatternId = patterns.first.id;
-      notifyListeners();
-    }
-  }
-
   void toggleStep(int channelIdx, int step, double velocity) {
     if (channelIdx >= 0 && channelIdx < channels.length) {
       channels[channelIdx].toggleStep(step, velocity);
@@ -90,6 +82,22 @@ class ProjectController extends ChangeNotifier {
   void play() {
     _transport?.play();
     isPlaying = true;
+
+    // Timer sync UI dengan C++ Engine Transport Position
+    _playbackTimer?.cancel();
+    _playbackTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {
+      if (!isPlaying) return;
+      
+      // Ambil posisi beat saat ini dan hitung step-nya
+      double currentBeat = 0.0; 
+      int calculatedStep = ((currentBeat * 4) % stepCount).toInt();
+
+      if (calculatedStep != currentStep) {
+        currentStep = calculatedStep;
+        notifyListeners();
+      }
+    });
+
     notifyListeners();
   }
 
@@ -97,6 +105,14 @@ class ProjectController extends ChangeNotifier {
     _transport?.stop();
     isPlaying = false;
     currentStep = -1;
+    _playbackTimer?.cancel();
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _playbackTimer?.cancel();
+    _engine.dispose();
+    super.dispose();
   }
 }

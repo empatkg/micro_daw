@@ -9,7 +9,6 @@ struct EngineWrapper {
     std::unique_ptr<te::Engine> engine;
 };
 
-// Helper internal untuk mengelola ValueTree StepClip
 static juce::ValueTree getOrCreatePatternState(te::StepClip* sc) {
     auto p = sc->state.getChildWithName(te::IDs::PATTERN);
     if (!p.isValid()) {
@@ -25,8 +24,7 @@ static juce::ValueTree getOrCreateChannelState(juce::ValueTree patternState, int
     for (int i = 0; i < patternState.getNumChildren(); ++i) {
         auto child = patternState.getChild(i);
         if (child.hasType(te::IDs::CHANNEL)) {
-            if (idx == channelIndex)
-                return child;
+            if (idx == channelIndex) return child;
             idx++;
         }
     }
@@ -46,6 +44,10 @@ TE_EXPORT TE_Engine te_engine_create(const char* appName, const char* logsPath) 
     auto* ew = new EngineWrapper();
     ew->juceInit = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
     ew->engine = std::make_unique<te::Engine>(appName != nullptr ? appName : "MicroDAW");
+    
+    // Inisialisasi Hardware Output Audio (WASAPI / AAudio / Oboe)
+    ew->engine->getDeviceManager().initialiseDefaultDevices(0, 2);
+    
     return ew;
 }
 
@@ -118,8 +120,13 @@ TE_EXPORT TE_Track te_track_insert_instrument_track(TE_Edit edit, const char* na
     auto* e = static_cast<te::Edit*>(edit);
     if (!e) return nullptr;
     auto track = e->insertNewAudioTrack(te::TrackInsertPoint(nullptr, nullptr), nullptr);
-    if (track && name) {
-        track->setName(juce::String(name));
+    if (track) {
+        if (name) track->setName(juce::String(name));
+        
+        // Auto-attach built-in 4OSC Synth agar MIDI note langsung mengeluarkan suara
+        if (auto plugin = e->getPluginCache().createNewPlugin(te::4OscPlugin::xmlTypeName, {})) {
+            track->pluginList.insertPlugin(plugin, 0, nullptr);
+        }
     }
     return track.get();
 }
