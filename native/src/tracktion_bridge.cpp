@@ -9,6 +9,37 @@ struct EngineWrapper {
     std::unique_ptr<te::Engine> engine;
 };
 
+// Helper internal untuk mengelola ValueTree StepClip
+static juce::ValueTree getOrCreatePatternState(te::StepClip* sc) {
+    auto p = sc->state.getChildWithName(te::IDs::PATTERN);
+    if (!p.isValid()) {
+        p = juce::ValueTree(te::IDs::PATTERN);
+        p.setProperty(te::IDs::numSteps, 16, nullptr);
+        sc->state.addChild(p, -1, nullptr);
+    }
+    return p;
+}
+
+static juce::ValueTree getOrCreateChannelState(juce::ValueTree patternState, int channelIndex) {
+    int idx = 0;
+    for (int i = 0; i < patternState.getNumChildren(); ++i) {
+        auto child = patternState.getChild(i);
+        if (child.hasType(te::IDs::CHANNEL)) {
+            if (idx == channelIndex)
+                return child;
+            idx++;
+        }
+    }
+    juce::ValueTree ch;
+    while (idx <= channelIndex) {
+        ch = juce::ValueTree(te::IDs::CHANNEL);
+        ch.setProperty(te::IDs::note, 60, nullptr);
+        patternState.addChild(ch, -1, nullptr);
+        idx++;
+    }
+    return ch;
+}
+
 extern "C" {
 
 TE_EXPORT TE_Engine te_engine_create(const char* appName, const char* logsPath) {
@@ -142,58 +173,52 @@ TE_EXPORT TE_Clip te_step_clip_create(TE_Track track, const char* name, double s
 TE_EXPORT void te_step_clip_set_num_channels(TE_Clip clip, int numChannels) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto pattern = sc->getPattern(0);
-    while (pattern.channels.size() < numChannels) {
-        pattern.channels.add(juce::BigInteger());
-        pattern.notes.add(60);
+    auto patState = getOrCreatePatternState(sc);
+    for (int i = 0; i < numChannels; ++i) {
+        getOrCreateChannelState(patState, i);
     }
-    sc->setPattern(0, pattern);
 }
 
 TE_EXPORT void te_step_clip_set_num_steps(TE_Clip clip, int numSteps) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto pattern = sc->getPattern(0);
-    pattern.numSteps = numSteps;
-    sc->setPattern(0, pattern);
+    auto patState = getOrCreatePatternState(sc);
+    patState.setProperty(te::IDs::numSteps, numSteps, nullptr);
 }
 
 TE_EXPORT void te_step_clip_set_cell(TE_Clip clip, int channel, int step, float velocity) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto pattern = sc->getPattern(0);
-    while (pattern.channels.size() <= channel) {
-        pattern.channels.add(juce::BigInteger());
-        pattern.notes.add(60);
-    }
+    auto patState = getOrCreatePatternState(sc);
+    auto chState = getOrCreateChannelState(patState, channel);
+
+    juce::String patStr = chState.getProperty(te::IDs::pattern).toString();
+    juce::BigInteger bi;
+    bi.parseString(patStr, 16);
+
     if (velocity > 0.01f) {
-        pattern.channels.getReference(channel).setBit(step);
+        bi.setBit(step);
     } else {
-        pattern.channels.getReference(channel).clearBit(step);
+        bi.clearBit(step);
     }
-    sc->setPattern(0, pattern);
+
+    chState.setProperty(te::IDs::pattern, bi.toString(16), nullptr);
 }
 
 TE_EXPORT void te_step_clip_clear_channel(TE_Clip clip, int channel) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto pattern = sc->getPattern(0);
-    if (channel >= 0 && channel < pattern.channels.size()) {
-        pattern.channels.getReference(channel).clear();
-        sc->setPattern(0, pattern);
-    }
+    auto patState = getOrCreatePatternState(sc);
+    auto chState = getOrCreateChannelState(patState, channel);
+    chState.setProperty(te::IDs::pattern, "0", nullptr);
 }
 
 TE_EXPORT void te_step_clip_set_channel_note(TE_Clip clip, int channel, int midiNote) {
     auto* sc = dynamic_cast<te::StepClip*>(static_cast<te::Clip*>(clip));
     if (!sc) return;
-    auto pattern = sc->getPattern(0);
-    while (pattern.notes.size() <= channel) {
-        pattern.channels.add(juce::BigInteger());
-        pattern.notes.add(60);
-    }
-    pattern.notes.set(channel, midiNote);
-    sc->setPattern(0, pattern);
+    auto patState = getOrCreatePatternState(sc);
+    auto chState = getOrCreateChannelState(patState, channel);
+    chState.setProperty(te::IDs::note, midiNote, nullptr);
 }
 
 TE_EXPORT TE_Clip te_midi_clip_create(TE_Track track, const char* name, double startBeat, double lengthBeats) {
