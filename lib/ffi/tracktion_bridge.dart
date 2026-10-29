@@ -79,7 +79,7 @@ class StepClip {
   StepClip._(this._clip);
 
   void setCell(int channel, int step, double velocity) {
-    teStepClipSetCell(_clip, channel, step, velocity);
+    teStepClipSetCell(_clip, channel, step, velocity.toDouble());
   }
 
   void setChannelNote(int channel, int midiNote) {
@@ -93,6 +93,6 @@ class MidiClip {
 
   void addNote(int pitch, double startBeat, double lengthBeats,
       {double velocity = 0.8, bool slide = false}) {
-    teMidiClipAddNote(_clip, pitch, startBeat, lengthBeats, velocity, slide ? 1 : 0);
+    teMidiClipAddNote(_clip, pitch, startBeat, lengthBeats, velocity.toDouble(), slide ? 1 : 0);
   }
 }
