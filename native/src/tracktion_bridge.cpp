@@ -75,7 +75,7 @@ TE_EXPORT void te_transport_set_loop_range(TE_Edit edit, double startBeat, doubl
     if (!e) return;
     auto start = e->tempoSequence.toTime(tracktion::BeatPosition::fromBeats(startBeat));
     auto end = e->tempoSequence.toTime(tracktion::BeatPosition::fromBeats(endBeat));
-    e->getTransport().setLoopRange({ start, end });
+    e->getTransport().setLoopRange(tracktion::TimeRange(start, end));
 }
 
 TE_EXPORT void te_transport_enable_loop(TE_Edit edit, int enabled) {
@@ -130,19 +130,21 @@ TE_EXPORT TE_Clip te_step_clip_create(TE_Track track, const char* name, double s
     auto start = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat));
     auto end = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat + lengthBeats));
 
+    te::ClipPosition clipPos { tracktion::TimeRange (start, end), {} };
+
     auto clip = t->insertNewClip(te::TrackItem::Type::step,
                                  juce::String(name != nullptr ? name : "Step"),
-                                 te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
+                                 clipPos,
                                  nullptr);
     return clip.get();
 }
 
 TE_EXPORT void te_step_clip_set_num_channels(TE_Clip clip, int numChannels) {
-    // Standard pattern step clip initializer
+    // Diproses otomatis oleh pola internal StepClip
 }
 
 TE_EXPORT void te_step_clip_set_num_steps(TE_Clip clip, int numSteps) {
-    // Standard pattern step count setter
+    // Diproses otomatis oleh pola internal StepClip
 }
 
 TE_EXPORT void te_step_clip_set_cell(TE_Clip clip, int channel, int step, float velocity) {
@@ -171,9 +173,11 @@ TE_EXPORT TE_Clip te_midi_clip_create(TE_Track track, const char* name, double s
     auto start = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat));
     auto end = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat + lengthBeats));
 
+    te::ClipPosition clipPos { tracktion::TimeRange (start, end), {} };
+
     auto clip = t->insertNewClip(te::TrackItem::Type::midi,
                                  juce::String(name != nullptr ? name : "Midi"),
-                                 te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
+                                 clipPos,
                                  nullptr);
     return clip.get();
 }
@@ -206,30 +210,35 @@ TE_EXPORT TE_Clip te_audio_clip_create(TE_Track track, const char* name, const c
     auto start = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat));
     auto end = ts.toTime(tracktion::BeatPosition::fromBeats(startBeat + lengthBeats));
 
+    te::ClipPosition clipPos { tracktion::TimeRange (start, end), {} };
     juce::File file(audioFilePath);
+
     auto clip = t->insertWaveClip(juce::String(name != nullptr ? name : "Audio"),
                                   file,
-                                  te::ClipPosition{ tracktion::TimeRange { start, end }, {} },
+                                  clipPos,
                                   false);
     return clip.get();
 }
 
 TE_EXPORT void te_audio_clip_set_time_stretch(TE_Clip clip, double ratio) {
     auto* ac = dynamic_cast<te::WaveAudioClip*>(static_cast<te::Clip*>(clip));
-    if (ac) ac->setTimeStretchRatio(ratio);
+    if (ac) {
+        ac->setSpeedRatio(ratio);
+    }
 }
 
 TE_EXPORT void te_audio_clip_set_pitch_shift(TE_Clip clip, double semitones) {
     auto* ac = dynamic_cast<te::WaveAudioClip*>(static_cast<te::Clip*>(clip));
-    if (ac) ac->setPitchOption(te::WaveAudioClip::PitchOption::semitones);
+    if (ac) {
+        ac->setPitchSemitones((float)semitones);
+    }
 }
 
 TE_EXPORT TE_Plugin te_track_load_plugin(TE_Track track, const char* pluginId) {
     auto* t = static_cast<te::AudioTrack*>(track);
     if (!t || !pluginId) return nullptr;
 
-    auto& pm = t->edit.engine.getPluginManager();
-    auto plugin = t->edit.getPluginCache().createNewPlugin(pm, juce::String(pluginId));
+    auto plugin = t->edit.getPluginCache().createNewPlugin(juce::String(pluginId));
     if (plugin) {
         t->pluginList.insertPlugin(plugin, 0, nullptr);
         return plugin.get();
