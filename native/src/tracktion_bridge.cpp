@@ -45,8 +45,8 @@ TE_EXPORT TE_Engine te_engine_create(const char* appName, const char* logsPath) 
     ew->juceInit = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
     ew->engine = std::make_unique<te::Engine>(appName != nullptr ? appName : "MicroDAW");
     
-    // Inisialisasi Audio Output (0 input, 2 output stereo)
-    ew->engine->getDeviceManager().initialise(0, 2, nullptr, true);
+    // Inisialisasi Device Manager dengan Perangkat Audio Default
+    ew->engine->getDeviceManager().initialise();
     
     return ew;
 }
@@ -123,7 +123,6 @@ TE_EXPORT TE_Track te_track_insert_instrument_track(TE_Edit edit, const char* na
     if (track) {
         if (name) track->setName(juce::String(name));
         
-        // Auto-attach built-in 4OSC synth menggunakan `te::FourOscPlugin::xmlTypeName`
         auto plugin = e->getPluginCache().createNewPlugin(te::FourOscPlugin::xmlTypeName, {});
         if (plugin) {
             track->pluginList.insertPlugin(plugin, 0, nullptr);
